@@ -13,6 +13,10 @@ Talk to the user in the language they use with you. Keep chat messages short: th
 App code: `${CLAUDE_PLUGIN_ROOT}`
 User data: `~/meeting-live/` (settings in `config.json`, meetings in `sessions/`)
 
+## 0. Meetings left without minutes
+
+Minutes are written by Claude after the meeting, so they are missing when this session was closed too early. Run `python -m app.follow pending` from `${CLAUDE_PLUGIN_ROOT}` (standard library only, no setup needed). If it lists meetings, ask the user in one line whether to write their minutes now. On yes, follow `${CLAUDE_PLUGIN_ROOT}/skills/minutes/SKILL.md` for each of them before starting a new meeting (or right after, if they want to start now).
+
 ## 1. Set up (every time, it is fast when nothing changed)
 
 1. Check Python: `python --version`. It needs 3.10 or newer. If Python is missing, tell the user to install it (`winget install Python.Python.3.12`) and stop.
@@ -41,7 +45,7 @@ User data: `~/meeting-live/` (settings in `config.json`, meetings in `sessions/`
 
 1. From `${CLAUDE_PLUGIN_ROOT}`, run `"$PY" -u -m app.main` with `run_in_background`. The subtitle window opens; the first start loads the speech model (seconds on a GPU, the first download takes longer).
 2. Watch its output for `session: <folder>`, `listening` and `error:` lines. On an error, tell the user what it says. Devices and languages can also be changed from the gear button in the window.
-3. Tell the user in one line that it is listening, and that closing the window (x) ends the meeting.
+3. Tell the user in one line that it is listening, that closing the window (x) ends the meeting, and to keep this Claude session open for a few seconds after that so you can write the minutes (`/meeting-live:minutes` can write them later too).
 4. Start following with the Monitor tool, from `${CLAUDE_PLUGIN_ROOT}`:
    `"$PY" -m app.follow watch --every 20` with `timeout_ms` 1800000. When the monitor expires and the meeting is still live, start it again.
 
@@ -67,13 +71,4 @@ Transcripts contain recognition mistakes; read through them by context. If a who
 
 The monitor prints `MEETING ENDED: <reason>` (the window was closed or it was silent for `idle_minutes`).
 
-1. Run `"$PY" -m app.follow new` once more to get anything left.
-2. Write `minutes.md` in the session folder, in the user's language:
-   - Title, date, duration, participants
-   - Summary (3–5 sentences)
-   - Decisions
-   - Action items as a checklist: owner, task, due date
-   - Open questions and follow-ups
-3. Pick a short topic (3–5 words) and rename the folder:
-   `"$PY" -m app.session rename "<session folder>" "<topic>"`
-4. Tell the user: the summary in 2–3 lines, their own action items, and the path to `minutes.md`.
+Read `${CLAUDE_PLUGIN_ROOT}/skills/minutes/SKILL.md` and follow it for this meeting's folder. You already have the transcript and notes in context, so only run `"$PY" -m app.follow new` for any last lines instead of reading everything again.
