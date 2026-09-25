@@ -1,0 +1,15 @@
+{
+  "name": "meeting-live",
+  "description": "Live meeting subtitles with local Whisper, with Claude following the meeting.",
+  "owner": {
+    "name": "Orhun Kenger",
+    "url": "https://github.com/orhunkengerr"
+  },
+  "plugins": [
+    {
+      "name": "meeting-live",
+      "source": "./",
+      "description": "Live meeting subtitles with local Whisper, while Claude follows the meeting."
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 """One folder per meeting.
 
-    sessions/2026-09-25_1430/
+    ~/meeting-live/sessions/2026-09-25_1430/
       session.json      start and end time, status, why it ended, topic
       transcript.jsonl  one line per sentence: time, speaker, original, translation
       notes.md          live notes (written by Claude)
@@ -20,7 +20,9 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
-SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
+from app.config import DATA_DIR
+
+SESSIONS_DIR = DATA_DIR / "sessions"
 TURKISH = str.maketrans("ıİşŞğĞçÇöÖüÜ", "iIsSgGcCoOuU")
 
 

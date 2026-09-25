@@ -1,0 +1,4 @@
+numpy>=2.0
+PyAudioWPatch>=0.2.12
+faster-whisper==1.2.1
+PySide6-Essentials>=6.8

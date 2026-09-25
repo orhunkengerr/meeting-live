@@ -405,6 +405,7 @@ class Overlay(QWidget):
             # While settings are open the window may be temporarily taller; remember the real size.
             g = self._geometry_before_settings or self.geometry()
             state = {"geometry": [g.x(), g.y(), g.width(), g.height()], "font_size": self.font_size}
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
             self.state_path.write_text(json.dumps(state), encoding="utf-8")
 
 

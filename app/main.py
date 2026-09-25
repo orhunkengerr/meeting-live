@@ -16,7 +16,7 @@ import threading
 from PySide6.QtCore import QTimer
 
 from app.audio import AudioCapture, list_devices
-from app.config import CONFIG_PATH, ROOT, Config, load_config, save_config
+from app.config import CONFIG_PATH, DATA_DIR, Config, load_config, save_config
 from app.overlay import Overlay
 from app.session import Session
 from app.settings_view import SettingsView
@@ -113,7 +113,7 @@ class Meeting:
 def main():
     first_run = not CONFIG_PATH.exists()
     config = load_config()
-    overlay = Overlay(state_path=ROOT / "overlay_state.json")
+    overlay = Overlay(state_path=DATA_DIR / "overlay_state.json")
     session = Session()
     meeting = Meeting(overlay, session)
     log(f"session: {session.path}")

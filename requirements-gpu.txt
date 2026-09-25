@@ -1,0 +1,3 @@
+# Only installed when an NVIDIA GPU is found (see setup_env.py)
+nvidia-cublas-cu12>=12.4
+nvidia-cudnn-cu12>=9.1

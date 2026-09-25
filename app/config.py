@@ -9,11 +9,15 @@ languages.
 import ctypes
 import json
 import locale
+import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = ROOT / "config.json"
+# Settings and meetings live outside the code, so updating the app (or the
+# Claude Code plugin, whose folder changes with every version) never touches them.
+DATA_DIR = Path(os.environ.get("MEETING_LIVE_HOME") or Path.home() / "meeting-live")
+CONFIG_PATH = DATA_DIR / "config.json"
 
 
 @dataclass
@@ -30,6 +34,7 @@ class Config:
     subtitle_language: str = "auto"  # "auto" uses your Windows display language
     model: str = "auto"              # Whisper model, "auto" picks one for your GPU
     idle_minutes: int = 20           # end the meeting after this long without speech
+    your_name: str = ""              # how people address you, so Claude notices questions aimed at you
 
     def target_language(self) -> str:
         return system_language() if self.subtitle_language == "auto" else self.subtitle_language
@@ -63,4 +68,5 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
 
 
 def save_config(config: Config, path: Path = CONFIG_PATH):
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(config), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

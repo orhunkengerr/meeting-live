@@ -1,0 +1,12 @@
+{
+  "name": "meeting-live",
+  "version": "0.1.0",
+  "displayName": "Meeting Live",
+  "description": "Live meeting subtitles with local Whisper, while Claude follows the meeting: running notes, questions aimed at you, suggested replies and minutes.",
+  "author": {
+    "name": "Orhun Kenger",
+    "url": "https://github.com/orhunkengerr"
+  },
+  "homepage": "https://github.com/orhunkengerr/meeting-live",
+  "license": "MIT"
+}
