@@ -1,6 +1,6 @@
 {
   "name": "meeting-live",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "Meeting Live",
   "description": "Live meeting subtitles with local Whisper, while Claude follows the meeting: running notes, questions aimed at you, suggested replies and minutes.",
   "author": {

@@ -1,5 +1,5 @@
 ---
-name: meeting-live
+name: start
 description: Start live meeting subtitles and follow the meeting for the user. Sets up the app on first use, keeps running notes, flags questions aimed at the user with a suggested reply, and writes the minutes when the meeting ends.
 disable-model-invocation: true
 ---
