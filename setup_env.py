@@ -25,6 +25,15 @@ PYTHON = VENV / "Scripts" / "python.exe" if os.name == "nt" else VENV / "bin" / 
 STAMP = VENV / ".installed"
 
 
+def _see_system_packages():
+    """Turn on system packages for an environment made before they were used."""
+    cfg = VENV / "pyvenv.cfg"
+    text = cfg.read_text(encoding="utf-8")
+    if "include-system-site-packages = false" in text:
+        cfg.write_text(text.replace("include-system-site-packages = false",
+                                    "include-system-site-packages = true"), encoding="utf-8")
+
+
 def main():
     if sys.version_info < (3, 10):
         sys.exit(f"Python 3.10 or newer is needed, this is {sys.version.split()[0]}.")
@@ -38,7 +47,11 @@ def main():
 
     if not PYTHON.exists():
         print(f"Creating environment in {VENV}", flush=True)
-        venv.create(VENV, with_pip=True)
+        # Seeing the system's packages means anything already installed at a
+        # fitting version is reused instead of being downloaded and stored twice.
+        venv.create(VENV, with_pip=True, system_site_packages=True)
+    else:
+        _see_system_packages()
     if not STAMP.exists() or STAMP.read_text() != stamp:
         print("Installing packages (first time takes a few minutes)", flush=True)
         args = [str(PYTHON), "-m", "pip", "install", "--disable-pip-version-check", "-q"]
