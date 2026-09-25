@@ -31,12 +31,49 @@ def _to_mono_16k(data: bytes, channels: int, rate: int) -> np.ndarray:
     return x.astype(np.float32)
 
 
-class AudioCapture:
-    """Opens the default speaker loopback and default microphone via WASAPI."""
+def _devices(pa: pyaudio.PyAudio, source: str):
+    """WASAPI devices for a source: speaker loopbacks for "them", microphones for "me"."""
+    if source == "them":
+        yield from pa.get_loopback_device_info_generator()
+        return
+    wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)["index"]
+    for i in range(pa.get_device_count()):
+        device = pa.get_device_info_by_index(i)
+        if device["hostApi"] == wasapi and device["maxInputChannels"] > 0 and not device.get("isLoopbackDevice"):
+            yield device
 
-    def __init__(self, out: queue.Queue, capture_mic: bool = True, block_ms: int = 100):
+
+def _find(pa: pyaudio.PyAudio, source: str, name: str) -> dict:
+    if name == "default":
+        if source == "them":
+            return pa.get_default_wasapi_loopback()
+        wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+        return pa.get_device_info_by_index(wasapi["defaultInputDevice"])
+    for device in _devices(pa, source):
+        if device["name"] == name:
+            return device
+    raise RuntimeError(f"audio device not found: {name}")
+
+
+def list_devices() -> dict[str, list[str]]:
+    """Device names to choose from, keyed by source."""
+    pa = pyaudio.PyAudio()
+    try:
+        return {source: [d["name"] for d in _devices(pa, source)] for source in ("them", "me")}
+    finally:
+        pa.terminate()
+
+
+class AudioCapture:
+    """Opens the chosen speaker loopback and/or microphone via WASAPI.
+
+    sources maps "them" and/or "me" to a device name, or "default".
+    Leave a source out to not capture it.
+    """
+
+    def __init__(self, out: queue.Queue, sources: dict[str, str], block_ms: int = 100):
         self.out = out
-        self.capture_mic = capture_mic
+        self.sources = sources
         self.block_ms = block_ms
         self._pa = None
         self._streams = []
@@ -64,12 +101,11 @@ class AudioCapture:
     def start(self) -> dict:
         """Start capturing. Returns the device names in use, keyed by source."""
         self._pa = pyaudio.PyAudio()
-        devices = {"them": self._open(self._pa.get_default_wasapi_loopback(), "them")}
-        if self.capture_mic:
-            wasapi = self._pa.get_host_api_info_by_type(pyaudio.paWASAPI)
-            mic = self._pa.get_device_info_by_index(wasapi["defaultInputDevice"])
-            devices["me"] = self._open(mic, "me")
-        return devices
+        try:
+            return {source: self._open(_find(self._pa, source, name), source) for source, name in self.sources.items()}
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self):
         for stream in self._streams:
@@ -89,9 +125,11 @@ class AudioCapture:
 
 
 if __name__ == "__main__":
-    # Quick check: play something and talk for 5 seconds, then see the levels.
+    # Quick check: list devices, then play something and talk for 5 seconds and see the levels.
+    for source, names in list_devices().items():
+        print(f"{source}: {names}")
     q = queue.Queue()
-    capture = AudioCapture(q)
+    capture = AudioCapture(q, {"them": "default", "me": "default"})
     for source, name in capture.start().items():
         print(f"{source:>4}: {name}")
     time.sleep(5)

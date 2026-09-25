@@ -1,13 +1,15 @@
 """Settings with sensible defaults.
 
 config.json only needs the keys you want to change; anything missing, or the
-whole file missing, falls back to the defaults below.
+whole file missing, falls back to the defaults below. The two audio channels
+are set up separately, since you and the other side often speak different
+languages.
 """
 
 import ctypes
 import json
 import locale
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,12 +17,22 @@ CONFIG_PATH = ROOT / "config.json"
 
 
 @dataclass
+class Channel:
+    enabled: bool = True
+    device: str = "default"  # a device name from app.audio.list_devices(), or "default"
+    language: str = "auto"   # e.g. "en"; "auto" detects it and locks after a few sentences
+
+
+@dataclass
 class Config:
-    source_language: str = "auto"  # language spoken in the meeting, e.g. "en"; "auto" detects it
-    target_language: str = "auto"  # language of the subtitles; "auto" uses your Windows display language
-    model: str = "auto"            # Whisper model, "auto" picks one for your GPU
-    capture_mic: bool = True       # also transcribe your own voice
-    idle_minutes: int = 20         # end the meeting after this long without speech
+    meeting_audio: Channel = field(default_factory=Channel)  # what comes out of your speakers
+    microphone: Channel = field(default_factory=Channel)     # your own voice
+    subtitle_language: str = "auto"  # "auto" uses your Windows display language
+    model: str = "auto"              # Whisper model, "auto" picks one for your GPU
+    idle_minutes: int = 20           # end the meeting after this long without speech
+
+    def target_language(self) -> str:
+        return system_language() if self.subtitle_language == "auto" else self.subtitle_language
 
 
 def system_language() -> str:
@@ -32,6 +44,11 @@ def system_language() -> str:
         return "en"
 
 
+def _pick(cls, data) -> dict:
+    known = {f.name for f in fields(cls)}
+    return {key: value for key, value in (data or {}).items() if key in known}
+
+
 def load_config(path: Path = CONFIG_PATH) -> Config:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -39,8 +56,11 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         data = {}
     except json.JSONDecodeError as error:
         raise SystemExit(f"{path.name} is not valid JSON: {error}")
-    known = {f.name for f in fields(Config)}
-    config = Config(**{key: value for key, value in data.items() if key in known})
-    if config.target_language == "auto":
-        config.target_language = system_language()
-    return config
+    top = _pick(Config, data)
+    top["meeting_audio"] = Channel(**_pick(Channel, data.get("meeting_audio")))
+    top["microphone"] = Channel(**_pick(Channel, data.get("microphone")))
+    return Config(**top)
+
+
+def save_config(config: Config, path: Path = CONFIG_PATH):
+    path.write_text(json.dumps(asdict(config), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

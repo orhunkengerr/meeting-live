@@ -7,3 +7,6 @@ overlay_state.json
 __pycache__/
 *.pyc
 .venv/
+
+# Your own settings, created by the settings page
+config.json

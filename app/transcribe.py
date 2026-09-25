@@ -5,20 +5,39 @@ pauses. Finished segments are transcribed with faster-whisper. With the model
 set to "auto", its size is picked from the GPU's memory.
 """
 
+import os
 import queue
 import subprocess
 import threading
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
+from pathlib import Path
 
-import numpy as np
-from faster_whisper import WhisperModel
 
-from app.audio import TARGET_RATE, AudioChunk
+def _add_nvidia_dll_dirs():
+    """pip's NVIDIA wheels put their DLLs in site-packages/nvidia/*/bin, which Windows does not search."""
+    try:
+        import nvidia
+    except ImportError:
+        return
+    for base in nvidia.__path__:
+        for bin_dir in Path(base).glob("*/bin"):
+            os.add_dll_directory(str(bin_dir))
+            os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
 
-# (minimum VRAM in MB, model). The first match wins.
-GPU_TIERS = [(8000, "large-v3"), (4000, "medium"), (0, "small")]
-CPU_MODEL = "base"
+
+_add_nvidia_dll_dirs()
+
+import numpy as np  # noqa: E402
+from faster_whisper import WhisperModel  # noqa: E402
+from faster_whisper.vad import get_vad_model  # noqa: E402
+
+from app.audio import TARGET_RATE, AudioChunk  # noqa: E402
+
+# (minimum VRAM in MB, model). The first match wins. Nothing below medium:
+# smaller models make up sentences from background noise.
+GPU_TIERS = [(4000, "large-v3-turbo"), (0, "medium")]
+CPU_MODEL = "medium"
 
 # With the language on "auto", it is locked once this many confident,
 # long-enough sentences agree. Short replies like "OK" are too easy to misread.
@@ -59,21 +78,46 @@ def pick_model(setting: str = "auto") -> tuple[str, str, str]:
     return next(model for mb, model in GPU_TIERS if vram >= mb), device, compute
 
 
-class Segmenter:
-    """Cuts one source's audio into utterances at pauses.
+class SpeechDetector:
+    """Tells speech from music, noise and silence with Silero VAD (bundled with faster-whisper).
 
-    Speech is anything louder than three times the background level. The
-    background level follows quiet parts quickly and creeps up slowly during
-    loud parts, so a constant hum stops counting as speech after a while.
+    Loudness alone is not enough: during a long talk with no pauses, a loudness
+    threshold slowly learns the voice as "background" and stops hearing it.
+    The model looks at each new 32 ms frame with about a second of context.
     """
 
-    def __init__(self, silence_ms=700, min_speech_ms=400, max_ms=15000, preroll_ms=300, min_level=0.008):
+    FRAME = 512           # samples per VAD frame at 16 kHz
+    CONTEXT_FRAMES = 30
+
+    def __init__(self, threshold: float = 0.5):
+        self.model = get_vad_model()
+        self.threshold = threshold
+        self.pending = np.zeros(0, dtype=np.float32)
+        self.history = np.zeros(0, dtype=np.float32)
+        self.last_probability = 0.0
+
+    def is_speech(self, samples: np.ndarray) -> bool:
+        self.pending = np.concatenate([self.pending, samples])
+        n = len(self.pending) // self.FRAME * self.FRAME
+        if n:
+            new, self.pending = self.pending[:n], self.pending[n:]
+            window = np.concatenate([self.history, new])
+            probabilities = np.asarray(self.model(window)).reshape(-1)[-(n // self.FRAME):]
+            self.history = window[-self.CONTEXT_FRAMES * self.FRAME:]
+            self.last_probability = float(probabilities.max())
+        return self.last_probability >= self.threshold
+
+
+class Segmenter:
+    """Cuts one source's audio into utterances at pauses in speech."""
+
+    # preroll keeps the quiet start of a word ("s" in "selam") before speech is detected.
+    def __init__(self, silence_ms=700, min_speech_ms=400, max_ms=15000, preroll_ms=500):
         self.silence_ms = silence_ms
         self.min_speech_ms = min_speech_ms
         self.max_ms = max_ms
-        self.min_level = min_level
         self.preroll = deque(maxlen=max(1, preroll_ms // 100))
-        self.noise = 0.003
+        self.detector = SpeechDetector()
         self._reset()
 
     def _reset(self):
@@ -87,12 +131,7 @@ class Segmenter:
         """Add a chunk. Returns (start, end, audio) when an utterance ends."""
         samples = chunk.samples
         ms = len(samples) / TARGET_RATE * 1000
-        level = float(np.sqrt(np.mean(samples ** 2))) if len(samples) else 0.0
-        speaking = level > max(self.min_level, self.noise * 3)
-        if speaking:
-            self.noise *= 1.002
-        else:
-            self.noise += 0.05 * (level - self.noise)
+        speaking = self.detector.is_speech(samples)
 
         if self.start is None:
             if not speaking:
@@ -120,7 +159,8 @@ class Segmenter:
 
 
 class Transcriber:
-    def __init__(self, model: str = "auto", language: str | None = "en"):
+    def __init__(self, model: str = "auto", languages: dict[str, str] | None = None):
+        """languages maps a source ("them", "me") to a language code or "auto"."""
         name, device, compute = pick_model(model)
         try:
             self.model = self._load(name, device, compute)
@@ -130,9 +170,15 @@ class Transcriber:
                 raise
             name, device, compute = (CPU_MODEL if model == "auto" else name), "cpu", "int8"
             self.model = self._load(name, device, compute)
-        self.description = f"{name} on {device}"
-        self.language = None if language == "auto" else language
-        self._votes = Counter()
+        # A GPU has time to compare several guesses (better on short words); a CPU does not.
+        self.beam_size = 5 if device == "cuda" else 1
+        self.description = f"{name} on {device}, beam {self.beam_size}"
+        self.set_languages(languages or {})
+
+    def set_languages(self, languages: dict[str, str]):
+        """Each source detects and locks its own language: you and the other side may differ."""
+        self.languages = {source: None if lang == "auto" else lang for source, lang in languages.items()}
+        self._votes: dict[str, Counter] = defaultdict(Counter)
 
     @staticmethod
     def _load(name: str, device: str, compute: str) -> WhisperModel:
@@ -141,21 +187,22 @@ class Transcriber:
         list(model.transcribe(np.zeros(TARGET_RATE, dtype=np.float32))[0])
         return model
 
-    def transcribe(self, audio: np.ndarray) -> tuple[str, str]:
+    def transcribe(self, audio: np.ndarray, source: str = "them") -> tuple[str, str]:
         """Return (text, language)."""
         segments, info = self.model.transcribe(
             audio,
-            language=self.language,
-            beam_size=1,
+            language=self.languages.get(source),
+            beam_size=self.beam_size,
             condition_on_previous_text=False,
         )
         text = " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.6).strip()
-        if (self.language is None and text and len(audio) >= LOCK_MIN_SECONDS * TARGET_RATE
+        if (self.languages.get(source) is None and text and len(audio) >= LOCK_MIN_SECONDS * TARGET_RATE
                 and info.language_probability >= LOCK_MIN_PROBABILITY):
-            self._votes[info.language] += 1
-            language, votes = self._votes.most_common(1)[0]
-            if votes >= LOCK_VOTES:
-                self.language = language
+            votes = self._votes[source]
+            votes[info.language] += 1
+            language, count = votes.most_common(1)[0]
+            if count >= LOCK_VOTES:
+                self.languages[source] = language
         return text, info.language
 
     def run(self, audio_q: queue.Queue, out_q: queue.Queue, stop: threading.Event):
@@ -169,6 +216,6 @@ class Transcriber:
             done = segmenters.setdefault(chunk.source, Segmenter()).feed(chunk)
             if done:
                 start, end, audio = done
-                text, language = self.transcribe(audio)
+                text, language = self.transcribe(audio, chunk.source)
                 if text:
                     out_q.put(Utterance(chunk.source, start, end, text, language))
