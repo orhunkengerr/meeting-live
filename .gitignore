@@ -1,0 +1,9 @@
+# Meeting recordings stay on your machine
+sessions/
+
+# Local window placement
+overlay_state.json
+
+__pycache__/
+*.pyc
+.venv/

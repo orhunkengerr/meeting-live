@@ -1,0 +1,7 @@
+{
+  "source_language": "auto",
+  "target_language": "auto",
+  "model": "auto",
+  "capture_mic": true,
+  "idle_minutes": 20
+}
